@@ -11,11 +11,11 @@ app = FastAPI()
 is_production = os.environ.get("RAILWAY_ENVIRONMENT") == "production"
 
 if is_production:
-    # Production: Allow Vercel domains (including preview deployments)
+    # Production: Allow Vercel domains (including preview deployments) and localhost for testing
     # Using regex to match all *.vercel.app subdomains for preview deployments
     app.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=r"https://.*\.vercel\.app",
+        allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+|http://127\.0\.0\.1:\d+",
         allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
