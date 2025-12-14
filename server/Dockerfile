@@ -13,5 +13,6 @@ COPY server/server.py .
 EXPOSE 8000
 
 # Run uvicorn with host 0.0.0.0 and port from PORT env var (default 8000)
-CMD ["python", "server.py"]
+# Railway will provide PORT environment variable at runtime
+CMD python server.py
 

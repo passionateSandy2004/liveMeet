@@ -1,68 +1,159 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Mini Google Meet</title>
+  <meta charset="UTF-8" />
+  <title>LiveKit Meet</title>
+
+  <style>
+    body {
+      background: #111;
+      color: white;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    #controls {
+      margin: 12px;
+    }
+    #controls button {
+      margin: 6px;
+      padding: 10px 16px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #videos {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 12px;
+    }
+    video {
+      width: 300px;
+      height: 220px;
+      margin: 8px;
+      background: black;
+      border-radius: 8px;
+    }
+  </style>
 </head>
+
 <body>
-  <h2>WebRTC Google Meet Clone</h2>
 
-  <video id="localVideo" autoplay playsinline muted></video>
-  <video id="remoteVideo" autoplay playsinline></video>
+<h2>LiveKit Meet</h2>
 
-  <script>
-    const roomId = "test-room";
-    const ws = new WebSocket(`ws://localhost:8000/ws/${roomId}`);
+<div id="controls">
+  <button id="joinBtn">Join</button>
+  <button id="micBtn">Mute</button>
+  <button id="camBtn">Camera Off</button>
+  <button id="screenBtn">Share Screen</button>
+</div>
 
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+<div id="videos"></div>
+
+<script type="module">
+  import {
+    Room,
+    RoomEvent,
+    createLocalScreenTracks
+  } from "https://unpkg.com/livekit-client@2/dist/livekit-client.esm.mjs";
+
+  const SERVER_URL = "http://192.168.29.66:8000";
+  const ROOM_NAME = "test";
+
+  let room;
+  let micOn = true;
+  let camOn = true;
+  let screenTracks = [];
+
+  const joinBtn = document.getElementById("joinBtn");
+  const micBtn = document.getElementById("micBtn");
+  const camBtn = document.getElementById("camBtn");
+  const screenBtn = document.getElementById("screenBtn");
+
+  joinBtn.onclick = joinRoom;
+  micBtn.onclick = toggleMic;
+  camBtn.onclick = toggleCam;
+  screenBtn.onclick = toggleScreen;
+
+  async function joinRoom() {
+    console.log("Joining room...");
+
+    const identity = "user-" + Math.floor(Math.random() * 100000);
+
+    const res = await fetch(
+      `${SERVER_URL}/token?room=${ROOM_NAME}&identity=${identity}`
+    );
+    const { token, url } = await res.json();
+
+    room = new Room();
+    await room.connect(url, token);
+
+    // enable camera + mic
+    await room.localParticipant.enableCameraAndMicrophone();
+
+    // attach local tracks
+    attachParticipant(room.localParticipant);
+
+    // attach remote tracks when subscribed
+    room.on(RoomEvent.TrackSubscribed, track => {
+      attachTrack(track);
     });
 
-    const localVideo = document.getElementById("localVideo");
-    const remoteVideo = document.getElementById("remoteVideo");
+    room.on(RoomEvent.TrackUnsubscribed, track => {
+      track.detach().forEach(el => el.remove());
+    });
 
-    // get camera + mic
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
-        localVideo.srcObject = stream;
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
-      });
+    joinBtn.disabled = true;
+  }
 
-    // send ICE candidates
-    pc.onicecandidate = event => {
-      if (event.candidate) {
-        ws.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
+  function attachParticipant(participant) {
+    participant.trackPublications.forEach(publication => {
+      if (publication.track) {
+        attachTrack(publication.track);
       }
-    };
+    });
+  }
 
-    // receive remote stream
-    pc.ontrack = event => {
-      remoteVideo.srcObject = event.streams[0];
-    };
+  function attachTrack(track) {
+    const el = track.attach();
+    el.autoplay = true;
+    el.playsInline = true;
+    el.muted = track.kind === "audio"; // avoid echo
+    document.getElementById("videos").appendChild(el);
+  }
 
-    ws.onmessage = async (message) => {
-      const data = JSON.parse(message.data);
+  function toggleMic() {
+    if (!room) return;
+    micOn = !micOn;
+    room.localParticipant.setMicrophoneEnabled(micOn);
+    micBtn.innerText = micOn ? "Mute" : "Unmute";
+  }
 
-      if (data.type === "offer") {
-        await pc.setRemoteDescription(data.offer);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        ws.send(JSON.stringify({ type: "answer", answer }));
+  function toggleCam() {
+    if (!room) return;
+    camOn = !camOn;
+    room.localParticipant.setCameraEnabled(camOn);
+    camBtn.innerText = camOn ? "Camera Off" : "Camera On";
+  }
+
+  async function toggleScreen() {
+    if (!room) return;
+
+    if (screenTracks.length === 0) {
+      screenTracks = await createLocalScreenTracks();
+      for (const track of screenTracks) {
+        await room.localParticipant.publishTrack(track);
       }
-
-      if (data.type === "answer") {
-        await pc.setRemoteDescription(data.answer);
+      screenBtn.innerText = "Stop Share";
+    } else {
+      for (const track of screenTracks) {
+        await room.localParticipant.unpublishTrack(track);
+        track.stop();
       }
+      screenTracks = [];
+      screenBtn.innerText = "Share Screen";
+    }
+  }
+</script>
 
-      if (data.type === "ice") {
-        await pc.addIceCandidate(data.candidate);
-      }
-    };
-
-    ws.onopen = async () => {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify({ type: "offer", offer }));
-    };
-  </script>
 </body>
 </html>
